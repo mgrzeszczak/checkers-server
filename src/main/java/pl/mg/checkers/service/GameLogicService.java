@@ -26,7 +26,6 @@ public class GameLogicService {
         }
     }
 
-
     public Map<Integer,List<Integer>> calculateMoves(int[][] grid, int color){
         System.out.println("My color: "+color);
         List<Integer> pawns = new ArrayList<>();

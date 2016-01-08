@@ -8,10 +8,7 @@ import org.springframework.stereotype.Component;
 import pl.mg.checkers.message.Message;
 import pl.mg.checkers.message.MsgType;
 import pl.mg.checkers.message.TypedMessage;
-import pl.mg.checkers.message.msgs.EndGameMessage;
-import pl.mg.checkers.message.msgs.GamePawnMoveMessage;
-import pl.mg.checkers.message.msgs.GameTurnMessage;
-import pl.mg.checkers.message.msgs.StartGameMessage;
+import pl.mg.checkers.message.msgs.*;
 import pl.mg.checkers.representation.GameRepresentation;
 import pl.mg.checkers.service.ClientService;
 import pl.mg.checkers.service.GameLogicService;
@@ -37,6 +34,9 @@ public class Game implements ClientMessageListener {
 
     private int whoseTurn;
 
+    private boolean turnSwitched;
+    private int pawnToMoveAgain;
+
     private Client[] clients = new Client[2];
 
     @Autowired
@@ -49,8 +49,6 @@ public class Game implements ClientMessageListener {
     private ClientService clientService;
     @Autowired
     private GameLogicService gameLogicService;
-
-
 
     public synchronized void setUp(Set<Client> clients){
         int which =  rand.nextInt(2);
@@ -66,6 +64,7 @@ public class Game implements ClientMessageListener {
         cArr[1].getClientListener().setListener(this);
         // notify
         whoseTurn = 0;
+        turnSwitched = true;
         messengerService.send(new TypedMessage(MsgType.gameStarted,new StartGameMessage(1,new GameRepresentation
                 (grid,cArr[1]))),this.clients[0]);
         messengerService.send(new TypedMessage(MsgType.gameStarted,new StartGameMessage(2,new GameRepresentation
@@ -88,7 +87,14 @@ public class Game implements ClientMessageListener {
             l.forEach(j->logger.debug(j));
         });
 
+        boolean capturedPawn = false;
+
         if (moveMap.containsKey(pawnIndex) && moveMap.get(pawnIndex).contains(destinationIndex)){
+
+            if (gameLogicService.canCapture(grid.getGrid(),pawnIndex,whoseTurn+1)){
+                capturedPawn = true;
+            }
+
             gameLogicService.updateGrid(grid.getGrid(),pawnIndex,destinationIndex);
 
             boolean gameEnd = gameLogicService.checkWinningConditions(grid.getGrid(),whoseTurn+1);
@@ -102,7 +108,15 @@ public class Game implements ClientMessageListener {
                 gameService.remove(this);
                 return;
             }
-            switchTurn();
+
+            if (!capturedPawn || !gameLogicService.canCapture(grid.getGrid(),destinationIndex,whoseTurn+1)) {
+                switchTurn();
+                turnSwitched = true;
+            } else {
+                turnSwitched = false;
+                pawnToMoveAgain = destinationIndex;
+            }
+
             messengerService.send(new TypedMessage(MsgType.gamePawnMove,new GamePawnMoveMessage(grid
                     .getGrid())),clients[0]);
             messengerService.send(new TypedMessage(MsgType.gamePawnMove,new GamePawnMoveMessage(grid
@@ -122,9 +136,16 @@ public class Game implements ClientMessageListener {
 
     @Override
     public void sendTurnMessage(Client client) {
-        boolean playerTurn = false;
-        if (clients[whoseTurn].equals(client)) playerTurn=true;
-        messengerService.send(new TypedMessage(MsgType.gameTurn,new GameTurnMessage(playerTurn)),client);
+        if (turnSwitched) {
+            boolean playerTurn = false;
+            if (clients[whoseTurn].equals(client)) playerTurn = true;
+            messengerService.send(new TypedMessage(MsgType.gameTurn, new GameTurnMessage(playerTurn)), client);
+        } else {
+            boolean playerTurn = false;
+            if (clients[whoseTurn].equals(client)) playerTurn = true;
+            messengerService.send(new TypedMessage(MsgType.gameContinueTurn, new GameContinueTurnMessage
+                    (pawnToMoveAgain,playerTurn)),client);
+        }
     }
 
     private void switchTurn(){
